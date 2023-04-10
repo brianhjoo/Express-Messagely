@@ -6,6 +6,7 @@
 const express = require("express");
 const cors = require("cors");
 const { authenticateJWT } = require("./middleware/auth");
+const User = require('./models/user');
 
 const { NotFoundError } = require("./expressError");
 const app = new express();
