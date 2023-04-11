@@ -14,18 +14,15 @@ class User {
 
   static async register({ username, password, first_name, last_name, phone }) {
     const hash = await bcrypt.hash(password, BCRYPT_WORK_FACTOR);
-    console.log('hash:', hash);
     const result = await db.query(
       `INSERT INTO users(username, password, first_name, last_name, phone, join_at)
          VALUES ($1, $2, $3, $4, $5, current_timestamp)
          RETURNING username, password, first_name, last_name, phone`,
       [username, hash, first_name, last_name, phone]
     );
-    console.log('result:', result);
+    console.log("result:", result);
     return result.rows[0];
   }
-
-
 
   /** Authenticate: is username/password valid? Returns boolean. */
 
@@ -38,7 +35,7 @@ class User {
     );
     console.log("result:", result);
 
-    const hash = result.rows[0];
+    const hash = result.rows[0].password;
     //if no password returned, user does not exist
     if (!hash) return false;
 
@@ -105,8 +102,8 @@ class User {
   static async messagesFrom(username) {
     const result = await db.query(
       `SELECT
-        m.id as id
-        m.to_user as to_user,
+        m.id as id,
+        m.to_username as to_user,
         m.body as body,
         m.sent_at as sent_at,
         m.read_at as read_at,
@@ -116,15 +113,15 @@ class User {
         t.phone as phone
 
         FROM messages as m
-          JOIN users as t ON m.to_user = t.username
+          JOIN users as t ON m.to_username = t.username
         WHERE from_username = $1`,
       [username]
     );
     const msgs = result.rows;
     if (!msgs) throw new NotFoundError(`No messages from ${username}!`);
-
-
+      console.log("msgs:", msgs);
     const msgsFrom = msgs.map((m) => {
+     console.log("m.id:", m.id);
       return {
         id: m.id,
         to_user: {
@@ -166,26 +163,30 @@ class User {
          JOIN users AS u
            ON u.username = m.from_username
        WHERE m.to_username = $1`,
-       [username]
+      [username]
     );
 
     const msgs = result.rows;
 
     if (!msgs) throw new NotFoundError(`No message found for user ${username}`);
 
-    return msgs.map(function(m) {
-      const {username, first_name, last_name, phone} = m;
-      const fromUserData = {username, first_name, last_name, phone};
+    return msgs.map(function (m) {
+      const { username, first_name, last_name, phone } = m;
+      const fromUserData = { username, first_name, last_name, phone };
 
       return {
         id: m.id,
         from_user: fromUserData,
         body: m.body,
         sent_at: m.sent_at,
-        read_at: m.read_at
-      }
+        read_at: m.read_at,
+      };
     });
   }
 }
 
+
+
 module.exports = User;
+
+
