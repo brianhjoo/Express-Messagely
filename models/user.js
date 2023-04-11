@@ -5,6 +5,7 @@ const { BCRYPT_WORK_FACTOR } = require("../config");
 const { NotFoundError } = require("../expressError");
 const db = require("../db");
 
+
 /** User of the site. */
 
 class User {
@@ -14,17 +15,23 @@ class User {
 
   static async register({ username, password, first_name, last_name, phone }) {
     const hash = await bcrypt.hash(password, BCRYPT_WORK_FACTOR);
-    console.log('hash:', hash);
+
     const result = await db.query(
-      `INSERT INTO users(username, password, first_name, last_name, phone, join_at)
-         VALUES ($1, $2, $3, $4, $5, current_timestamp)
-         RETURNING username, password, first_name, last_name, phone`,
+      `INSERT INTO users(username,
+                        password,
+                        first_name,
+                        last_name,
+                        phone,
+                        join_at,
+                        last_login_at)
+        VALUES
+            ($1, $2, $3, $4, $5, current_timestamp, current_timestamp)
+        RETURNING username, password, first_name, last_name, phone`,
       [username, hash, first_name, last_name, phone]
     );
-    console.log('result:', result);
+
     return result.rows[0];
   }
-
 
 
   /** Authenticate: is username/password valid? Returns boolean. */
@@ -32,17 +39,14 @@ class User {
   static async authenticate(username, password) {
     const result = await db.query(
       `SELECT password
-      FROM users
-      WHERE username = $1`,
-      [username]
+        FROM users
+        WHERE username = $1`,
+        [username]
     );
-    console.log("result:", result);
 
-    const hash = result.rows[0];
-    //if no password returned, user does not exist
-    if (!hash) return false;
+    const hash = result.rows[0].password;
 
-    return await bcrypt.compare(password, hash);
+    return (await bcrypt.compare(password, hash) === true);
   }
 
   /** Update last_login_at for user */
@@ -53,10 +57,12 @@ class User {
         SET last_login_at = current_timestamp
         WHERE username = $1
         RETURNING last_login_at`,
-      [username]
+        [username]
     );
-    const lastLogin = result.rows[0];
-    console.log("last login:", lastLogin);
+
+    if (!result.rows[0]) throw new NotFoundError(`User ${username}, not found!`);
+
+    console.log('Login timestamp updated!');
   }
 
   /** All: basic info on all users:
@@ -65,10 +71,12 @@ class User {
   static async all() {
     const result = await db.query(
       `SELECT username, first_name, last_name
-        FROM users`
+        FROM users
+        ORDER BY username`
     );
 
     const allUsers = result.rows; //doublecheck each row is {username:, ...}
+
     return allUsers;
   }
 
@@ -83,14 +91,21 @@ class User {
 
   static async get(username) {
     const result = await db.query(
-      `SELECT username, first_name, last_name, phone, join_at, last_login_at
+      `SELECT username,
+              first_name,
+              last_name,
+              phone,
+              join_at,
+              last_login_at
         FROM users
         WHERE username = $1`,
-      [username]
+        [username]
     );
 
     const user = result.rows[0];
+
     if (!user) throw new NotFoundError(`No user: ${username}`);
+
     return user;
   }
 
@@ -105,30 +120,28 @@ class User {
   static async messagesFrom(username) {
     const result = await db.query(
       `SELECT
-        m.id as id
-        m.to_user as to_user,
-        m.body as body,
-        m.sent_at as sent_at,
-        m.read_at as read_at,
-        t.username as username,
-        t.first_name as first_name,
-        t.last_name as last_name,
-        t.phone as phone
-
+          m.id as id,
+          m.to_username as to_user,
+          m.body as body,
+          m.sent_at as sent_at,
+          m.read_at as read_at,
+          u.username as username,
+          u.first_name as first_name,
+          u.last_name as last_name,
+          u.phone as phone
         FROM messages as m
-          JOIN users as t ON m.to_user = t.username
+          JOIN users as u ON m.to_username = u.username
         WHERE from_username = $1`,
-      [username]
+        [username]
     );
-    const msgs = result.rows;
-    if (!msgs) throw new NotFoundError(`No messages from ${username}!`);
 
+    const msgsFrom = result.rows;
 
-    const msgsFrom = msgs.map((m) => {
+    return msgsFrom.map(function(m) {
       return {
         id: m.id,
         to_user: {
-          username: m.username,
+          username: m.to_user,
           first_name: m.first_name,
           last_name: m.last_name,
           phone: m.phone,
@@ -138,8 +151,6 @@ class User {
         read_at: m.read_at,
       };
     });
-
-    return msgsFrom;
   }
 
   /** Return messages to this user.
@@ -166,26 +177,30 @@ class User {
          JOIN users AS u
            ON u.username = m.from_username
        WHERE m.to_username = $1`,
-       [username]
+      [username]
     );
 
-    const msgs = result.rows;
+    const msgsTo = result.rows;
 
-    if (!msgs) throw new NotFoundError(`No message found for user ${username}`);
-
-    return msgs.map(function(m) {
-      const {username, first_name, last_name, phone} = m;
-      const fromUserData = {username, first_name, last_name, phone};
-
+    return msgsTo.map(function (m) {
       return {
         id: m.id,
-        from_user: fromUserData,
+        from_user: {
+          username: m.username,
+          first_name: m.first_name,
+          last_name: m.last_name,
+          phone: m.phone
+        },
         body: m.body,
         sent_at: m.sent_at,
         read_at: m.read_at
-      }
+      };
     });
   }
 }
 
+
 module.exports = User;
+
+
+
