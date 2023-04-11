@@ -3,6 +3,7 @@
 const bcrypt = require("bcrypt");
 const { BCRYPT_WORK_FACTOR } = require("../config");
 const { NotFoundError } = require("../expressError");
+const db = require("../db");
 
 /** User of the site. */
 
@@ -13,19 +14,18 @@ class User {
 
   static async register({ username, password, first_name, last_name, phone }) {
     const hash = await bcrypt.hash(password, BCRYPT_WORK_FACTOR);
+    console.log('hash:', hash);
     const result = await db.query(
-      `INSERT INTO users(username, password, first_name, last_name, phone)
-         VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users(username, password, first_name, last_name, phone, join_at)
+         VALUES ($1, $2, $3, $4, $5, current_timestamp)
          RETURNING username, password, first_name, last_name, phone`,
       [username, hash, first_name, last_name, phone]
     );
-
-    console.log("result:", result);
-
-    const { username, password, first_name, last_name, phone } = result.rows[0];
-
-    return { username, password, first_name, last_name, phone };
+    console.log('result:', result);
+    return result.rows[0];
   }
+
+
 
   /** Authenticate: is username/password valid? Returns boolean. */
 
@@ -48,15 +48,12 @@ class User {
   /** Update last_login_at for user */
 
   static async updateLoginTimestamp(username) {
-    const now = new Date();
-    const timestamp = `${now.toISOString()} ${now.getTimezoneOffset()}`;
-
     const result = await db.query(
       `UPDATE users
-        SET last_login_at = $1
-        WHERE username = $2
+        SET last_login_at = current_timestamp
+        WHERE username = $1
         RETURNING last_login_at`,
-      [timestamp, username]
+      [username]
     );
     const lastLogin = result.rows[0];
     console.log("last login:", lastLogin);
@@ -154,8 +151,40 @@ class User {
    */
 
   static async messagesTo(username) {
-    const result = await db.query(`SELECT id, `);
+    const result = await db.query(
+      `SELECT
+          m.id AS id,
+          m.from_username AS from_user,
+          m.body AS body,
+          m.sent_at AS sent_at,
+          m.read_at AS read_at,
+          u.username AS username,
+          u.first_name AS first_name,
+          u.last_name AS last_name,
+          u.phone AS phone
+       FROM messages AS m
+         JOIN users AS u
+           ON u.username = m.from_username
+       WHERE m.to_username = $1`,
+       [username]
+    );
 
+    const msgs = result.rows;
+
+    if (!msgs) throw new NotFoundError(`No message found for user ${username}`);
+
+    return msgs.map(function(m) {
+      const {username, first_name, last_name, phone} = m;
+      const fromUserData = {username, first_name, last_name, phone};
+
+      return {
+        id: m.id,
+        from_user: fromUserData,
+        body: m.body,
+        sent_at: m.sent_at,
+        read_at: m.read_at
+      }
+    });
   }
 }
 
